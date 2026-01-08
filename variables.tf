@@ -15,3 +15,15 @@ variable "ami_id" {
   type        = string
   default     = "ami-001117ee91f2f35c9"
 }
+
+variable "instance_count" {
+  description = "Number of EC2 instances to provision"
+  type        = number
+  default     = 1
+}
+
+variable "public_key_path" {
+  description = "Path to the public SSH key"
+  type        = string
+  default     = "~/.ssh/id_rsa.pub"
+}

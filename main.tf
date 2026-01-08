@@ -50,14 +50,9 @@ resource "random_pet" "server" {
   length = 2
 }
 
-resource "tls_private_key" "pk" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
-
 resource "aws_key_pair" "kp" {
   key_name   = "generated-key-${random_pet.server.id}"
-  public_key = tls_private_key.pk.public_key_openssh
+  public_key = file(var.public_key_path)
 }
 
 # --- Security Group ---
@@ -98,6 +93,7 @@ resource "aws_security_group" "app_sg" {
 # --- EC2 Instance ---
 
 resource "aws_instance" "app_server" {
+  count         = var.instance_count
   ami           = data.aws_ami.ubuntu.id
   instance_type = var.instance_type
   key_name      = aws_key_pair.kp.key_name
@@ -117,6 +113,6 @@ resource "aws_instance" "app_server" {
               EOF
 
   tags = {
-    Name = "App-Server-${random_pet.server.id}"
+    Name = "App-Server-${random_pet.server.id}-${count.index}"
   }
 }
