@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region to deploy resources"
   type        = string
-  default     = "us-east-2"
+  default     = "eu-west-1"
 }
 
 variable "instance_type" {
@@ -19,11 +19,17 @@ variable "ami_id" {
 variable "instance_count" {
   description = "Number of EC2 instances to provision"
   type        = number
-  default     = 1
+  default     = 5
 }
 
 variable "public_key_path" {
   description = "Path to the public SSH key"
   type        = string
   default     = "~/.ssh/id_rsa.pub"
+}
+
+variable "volume_size" {
+  description = "Size of the root volume in GB"
+  type        = number
+  default     = 10
 }
