@@ -1,127 +1,122 @@
-
 terraform {
-required_providers {
-aws = {
-source  = "hashicorp/aws"
-version = "~> 5.0"
-}
-}
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+  }
 }
 
 provider "aws" {
-region = var.aws_region
+  region = var.aws_region
 }
 
+# --- Data Sources for Default VPC ---
 
-resource "aws_vpc" "app_vpc" {
-cidr_block           = var.vpc_cidr_block
-enable_dns_hostnames = true
-
-tags = {
-Name = "Simple-App-VPC"
-}
+data "aws_vpc" "default" {
+  default = true
 }
 
-
-resource "aws_internet_gateway" "app_igw" {
-vpc_id = aws_vpc.app_vpc.id
-
-tags = {
-Name = "Simple-App-IGW"
-}
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
 }
 
+# --- Latest Ubuntu 22.04 LTS AMI ---
 
-resource "aws_subnet" "app_subnet_public" {
-vpc_id                  = aws_vpc.app_vpc.id
-cidr_block              = var.subnet_cidr_block
-map_public_ip_on_launch = true # This is crucial for "instant" public access
-availability_zone       = "${var.aws_region}a"
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
 
-tags = {
-Name = "Simple-App-Public-Subnet"
-}
-}
-
-
-resource "aws_route_table" "app_route_table" {
-vpc_id = aws_vpc.app_vpc.id
-
-route {
-cidr_block = "0.0.0.0/0"
-gateway_id = aws_internet_gateway.app_igw.id
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
 }
 
-tags = {
-Name = "Simple-App-Route-Table"
-}
-}
+# --- SSH Key Generation ---
 
-resource "aws_route_table_association" "app_rta_public" {
-subnet_id      = aws_subnet.app_subnet_public.id
-route_table_id = aws_route_table.app_route_table.id
+resource "random_pet" "server" {
+  length = 2
 }
 
+resource "tls_private_key" "pk" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
 
+resource "aws_key_pair" "kp" {
+  key_name   = "generated-key-${random_pet.server.id}"
+  public_key = tls_private_key.pk.public_key_openssh
+}
+
+# --- Security Group ---
 
 resource "aws_security_group" "app_sg" {
-name        = "app-instance-security-group"
-description = "Allow SSH and HTTP inbound traffic"
-vpc_id      = aws_vpc.app_vpc.id
+  name        = "app-sg-${random_pet.server.id}"
+  description = "Allow SSH and HTTP inbound traffic"
+  vpc_id      = data.aws_vpc.default.id
 
+  ingress {
+    description = "Allow SSH from Internet"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-ingress {
-description = "Allow SSH from Internet"
-from_port   = 22
-to_port     = 22
-protocol    = "tcp"
-cidr_blocks = ["0.0.0.0/0"]
+  ingress {
+    description = "Allow HTTP from Internet"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "App-SG-${random_pet.server.id}"
+  }
 }
 
+# --- EC2 Instance ---
 
-ingress {
-description = "Allow HTTP from Internet"
-from_port   = 80
-to_port     = 80
-protocol    = "tcp"
-cidr_blocks = ["0.0.0.0/0"]
-}
+resource "aws_instance" "app_server" {
+  ami           = data.aws_ami.ubuntu.id
+  instance_type = var.instance_type
+  key_name      = aws_key_pair.kp.key_name
 
+  subnet_id                   = tolist(data.aws_subnets.default.ids)[0]
+  vpc_security_group_ids      = [aws_security_group.app_sg.id]
+  associate_public_ip_address = true
 
-egress {
-from_port   = 0
-to_port     = 0
-protocol    = "-1"
-cidr_blocks = ["0.0.0.0/0"]
-}
+  user_data = <<-EOF
+              #!/bin/bash
+              sudo apt update -y
+              sudo apt upgrade -y
+              sudo apt install -y apache2
+              sudo systemctl start apache2
+              sudo systemctl enable apache2
+              echo "<h1>Hello from Terraform Ubuntu EC2!</h1>" > /var/www/html/index.html
+              EOF
 
-tags = {
-Name = "App-SG"
-}
-}
-
-
-resource "aws_instance" "instant_app_server" {
-
-ami           = var.ami_id
-instance_type = var.instance_type
-key_name      = var.key_pair_name
-
-subnet_id                   = aws_subnet.app_subnet_public.id
-vpc_security_group_ids      = [aws_security_group.app_sg.id]
-associate_public_ip_address = true 
-
-
-user_data = <<-EOF
-#!/bin/bash
-sudo yum update -y
-sudo yum install -y httpd
-sudo systemctl start httpd
-sudo systemctl enable httpd
-echo "<h1>Hello from Terraform EC2!</h1>" > /var/www/html/index.html
-EOF
-
-tags = {
-Name = "Instant-Terraform-Server"
-}
+  tags = {
+    Name = "App-Server-${random_pet.server.id}"
+  }
 }
