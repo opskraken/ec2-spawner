@@ -137,3 +137,15 @@ resource "aws_instance" "app_server" {
     delete_on_termination = true
   }
 }
+
+# --- Elastic IP for Persistent Public IP ---
+
+resource "aws_eip" "app_eip" {
+  count    = var.instance_count
+  instance = aws_instance.app_server[count.index].id
+  domain   = "vpc"
+  
+  tags = {
+    Name = "App-EIP-${random_pet.server.id}-${count.index}"
+  }
+}
